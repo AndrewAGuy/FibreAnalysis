@@ -1,10 +1,11 @@
 from pickle import TUPLE2
 from skimage.io import imread
 from skimage.color import rgb2gray
-from skimage.morphology import skeletonize, opening, disk
+from skimage.morphology import skeletonize, opening, closing, disk
 from skimage.feature import hessian_matrix
 from skimage.exposure import equalize_hist
 from skimage.filters import frangi, threshold_otsu
+from skimage.measure import label
 import numpy as np
 from numpy import linalg as la
 
@@ -114,7 +115,7 @@ class TubenessImage:
 
     def set_scores(self):
         """
-        
+
         """
         for s, f in self.images.items():
             f.response = np.sum(f.image * self.mask)
@@ -168,8 +169,9 @@ class TubenessImage:
         r = dict()
         intensity = np.array([f.contribution / f.dominance
                               for f in self.images.values()])
+        sigmas = np.array(list(self.images.keys()))
         idx = np.nonzero(intensity >= intensity_fraction * np.amax(intensity))
-        t_image = self.get_filtered(idx[0])
+        t_image = self.get_filtered(sigmas[idx[0]])
         threshold = TubenessImage.get_threshold(t_image, t_method, t_kwargs)
         self.mask = self.max > threshold
         if report:
@@ -220,3 +222,48 @@ def load(path):
     if len(image.shape) == 3:
         image = rgb2gray(image)
     return image
+
+
+class PoreImage:
+    def __init__(self, tubeImage):
+        self.tube = tubeImage
+
+    def segment(self, mode='i', threshold=None, close=0):
+        if mode == 'i':
+            if threshold is None:
+                threshold = 0.9
+            intensity = np.array([f.contribution / f.dominance
+                                  for f in self.tube.images.values()])
+            sigmas = np.array(list(self.tube.images.keys()))
+            idx = np.nonzero(intensity >= threshold * np.amax(intensity))
+            t_image = self.tube.get_filtered(sigmas[idx[0]])
+            threshold = threshold_otsu(t_image)
+            self.foreground = self.tube.max > threshold
+        elif mode == 'v':
+            if threshold is None:
+                threshold = threshold_otsu(self.tube.max)
+            self.foreground = self.tube.max > threshold
+        elif mode == 'f':
+            if threshold is None:
+                threshold = threshold_otsu(self.tube.image)
+            self.foreground = self.tube.image > threshold
+        elif mode == 'h':
+            self.foreground = self.tube.image > threshold #threshold_otsu(self.tube.image)
+            #if threshold is None:
+            #    threshold = 0.9
+            intensity = np.array([f.contribution / f.dominance
+                                  for f in self.tube.images.values()])
+            sigmas = np.array(list(self.tube.images.keys()))
+            idx = np.nonzero(intensity >= threshold * np.amax(intensity))
+            t_image = self.tube.get_filtered(sigmas[idx[0]])
+            threshold = threshold_otsu(t_image)
+            self.foreground |= self.tube.max > threshold
+
+        if close != 0:
+            self.foreground = closing(self.foreground, disk(close))
+
+    def analyse(self):
+        self.labelled, self.max_label = label(
+            ~self.foreground, return_num=True, connectivity=1)
+        self.areas = [np.sum(self.labelled == k)
+                      for k in range(1, self.max_label + 1)]
