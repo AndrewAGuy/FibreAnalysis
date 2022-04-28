@@ -1,3 +1,4 @@
+from pickle import TUPLE2
 from skimage.io import imread
 from skimage.color import rgb2gray
 from skimage.morphology import skeletonize, opening, disk
@@ -9,8 +10,32 @@ from numpy import linalg as la
 
 
 class FilteredImage:
+    """
+    An image which has been filtered using Frangi's filter for a given sigma.
+    The image represents a probability of a pixel being a vessel of radius
+    sigma. Also stores the Hessian matrix for this sigma, to extract the
+    orientations when queried at a point.
+
+    Attributes:
+        sigma : float
+        image : ndarray
+        hessian : list[ndarray]
+        response : float
+        dominance : int
+        contribution : float
+
+    References: 
+        Frangi, Alejandro F., et al. "Multiscale vessel enhancement filtering."
+        International conference on medical image computing and 
+        computer-assisted intervention. Springer, Berlin, Heidelberg, 1998.
+    """
+
     @staticmethod
     def ensure_filter(method, kwargs):
+        """
+        Sets a method and arguments object to the defaults
+        (frangi, white vessels on black background) if not specified.
+        """
         if method is None:
             method = frangi
         if kwargs is None:
@@ -21,12 +46,37 @@ class FilteredImage:
 
     def __init__(self, image, sigma,
                  method=None, kwargs=None):
+        """
+        Parameters:
+            image : ndarray
+                Grayscale image to filter.
+            sigma : float
+                The radius of the fibres the filter will respond to.
+            method : callable
+                The function to use to look to fibres. Defaults to `frangi`.
+                Must take an image as its first argument and a list of scales
+                `sigmas`.
+            kwargs : dict
+                The optional keyword arguments for `method`. Defaults to 
+                identifying white vessels.
+        """
         method, kwargs = FilteredImage.ensure_filter(method, kwargs)
         self.image = method(image, sigmas=[sigma], **kwargs)
         self.sigma = sigma
         self.hessian = hessian_matrix(image, sigma=sigma, order='rc')
 
     def get_orientation(self, index):
+        """
+        For a pixel specified by a (row, col) tuple, returns the orientation in
+        radians from the -y axis, anticlockwise. Because we cannot distinguish
+        between directions, clamps to range [0, pi].
+
+        Parameters        
+            index : (int, int)
+                The point to query as a 2-tuple
+        Returns        
+            orientation : float in range [0, pi]
+        """
         hrr = self.hessian[0][index]
         hrc = self.hessian[1][index]
         hcc = self.hessian[2][index]
@@ -34,7 +84,6 @@ class FilteredImage:
                       [hrc, hcc]])
         l, V = la.eigh(H)
         v = V[:, np.argmin(np.abs(l))]
-        # This now gives angle from -y axis, anticlockwise
         angle = np.arctan2(v[1], v[0])
         return angle if angle >= 0 else angle + np.pi
 
@@ -64,9 +113,9 @@ class TubenessImage:
             self.max_sigma[idx] = s
 
     def set_scores(self):
-        # Set scores of each filtered image
-        # Total response to the filter, pixels dominated by this filter
-        # and total vesselness score contributed by this scale
+        """
+        
+        """
         for s, f in self.images.items():
             f.response = np.sum(f.image * self.mask)
             idx = (self.max_sigma == s) * self.mask
@@ -74,6 +123,23 @@ class TubenessImage:
             f.contribution = np.sum(idx * self.max)
 
     def get_scores(self):
+        """
+        Gets the scores associated with each length scale.
+        Scores returned:
+            - Response: sum of filter response at that scale
+            - Dominance: number of pixels which responded most intensely at
+              the given scale
+            - Contribution: sum of filter response at dominant pixels
+            - Intensity: average filter response at dominant pixels,
+              equal to Contribution/Dominance
+
+        Returns
+            scales : list
+                List of scales the filter was run at.
+            scores : dict
+                Dictionary with 4 entries, each of which is a
+                list the same length as scales.
+        """
         scores = {
             'response': [f.response for f in self.images.values()],
             'dominance': [f.dominance for f in self.images.values()],
@@ -140,6 +206,16 @@ class TubenessImage:
 
 
 def load(path):
+    """
+    Opens an image and converts it to grayscale.
+
+    Parameters:
+        path : str
+            The file to open.
+    Returns:
+        image : ndarray
+            The image as a 2D grayscale image.
+    """
     image = imread(path)
     if len(image.shape) == 3:
         image = rgb2gray(image)
