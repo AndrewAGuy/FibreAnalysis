@@ -1,3 +1,9 @@
+"""
+SEM Fibre Analysis
+    Author: Andrew Guy (aag43@cam.ac.uk)
+    License: AGPL-v3.0
+"""
+
 from skimage.io import imread
 from skimage.color import rgb2gray
 from skimage.morphology import skeletonize, opening, closing, disk
@@ -298,12 +304,19 @@ class PoreImage:
 
     Attributes:
         fibres : FibreImage
+        labelled : ndarray, int
+            The pore labels, with 0 as background.
+        max_label : int
+            The number of pores.
     """
 
-    def __init__(self, fibreImage):
+    def __init__(self, fibreImage,
+                 i_factor=0.9, v_radius=2, f_radius=2, fg_std=1):
         """
+        See `PoreImage.set_foreground`
         """
         self.fibres = fibreImage
+        self.set_foreground(i_factor, v_radius, f_radius, fg_std)
 
     def set_foreground(self, i_factor=0.9, v_radius=2, f_radius=2, fg_std=1):
         """
@@ -334,9 +347,17 @@ class PoreImage:
         fg = morph(fg, f_radius)
 
         self.foreground = tf | fg
-
-    def analyze(self):
         self.labelled, self.max_label = label(
             ~self.foreground, return_num=True, connectivity=1)
-        self.areas = np.array([np.sum(self.labelled == k)
-                               for k in range(1, self.max_label + 1)])
+
+    def get_areas(self):
+        """
+        """
+        return np.array([np.sum(self.labelled == k)
+                         for k in range(1, self.max_label + 1)])
+
+    def get_pore_coords(self, label):
+        """
+        """
+        i, j = np.nonzero(self.labelled == label)
+        return np.stack((i, j), axis=0)
