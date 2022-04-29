@@ -1,4 +1,4 @@
-from analysis import FibreImage, load
+from analysis import FibreImage, PoreImage, load
 import glob
 import numpy as np
 import matplotlib.pyplot as plt
@@ -70,3 +70,15 @@ def plot_and_save(path, angles, diams, count):
     ax[1].hist(angles, bins=50)
     #ax[2].scatter(angles, diams)
     fig.show()
+
+
+def process_pores(poreImage, path):
+    props = poreImage.get_props()
+    with open(path+'-pores.csv', 'w') as file:
+        file.write('area,angle,major,minor,eccentricity\n')
+        for p in props:
+            file.write(f'{p.area},{p.orientation},{p.axis_major_length},'
+                       f'{p.axis_minor_length},{p.eccentricity}\n')
+    plt.imsave(path+'-pores.png',~poreImage.foreground,cmap='gray')
+    with open(path+'-pores.txt','w') as file:
+        file.write(f'Porosity: {poreImage.porosity()}')

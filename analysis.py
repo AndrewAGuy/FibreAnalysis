@@ -6,11 +6,12 @@ SEM Fibre Analysis
 
 from skimage.io import imread
 from skimage.color import rgb2gray
-from skimage.morphology import skeletonize, opening, closing, disk
+from skimage.morphology import (skeletonize, opening, closing, disk,
+                                remove_small_holes)
 from skimage.feature import hessian_matrix
 from skimage.exposure import equalize_hist
 from skimage.filters import frangi, threshold_otsu
-from skimage.measure import label
+from skimage.measure import label, regionprops
 import numpy as np
 from numpy import linalg as la
 
@@ -311,14 +312,15 @@ class PoreImage:
     """
 
     def __init__(self, fibreImage,
-                 i_factor=0.9, v_radius=2, f_radius=2, fg_std=1):
+                 i_factor=0.9, v_radius=2, f_radius=2, fg_std=1, min_area=16):
         """
         See `PoreImage.set_foreground`
         """
         self.fibres = fibreImage
-        self.set_foreground(i_factor, v_radius, f_radius, fg_std)
+        self.set_foreground(i_factor, v_radius, f_radius, fg_std, min_area)
 
-    def set_foreground(self, i_factor=0.9, v_radius=2, f_radius=2, fg_std=1):
+    def set_foreground(self, i_factor=0.9, v_radius=2, f_radius=2, fg_std=1,
+                       min_area=16):
         """
         Generates the image foreground. Starting from the same method as
         `FibreImage.get_foreground`, opens or closes this based on parameter
@@ -337,6 +339,8 @@ class PoreImage:
             fg_std : float
                 Generates image threshold from `mean(F) - fg_std * std(F)`,
                 where F are fibre pixels.
+            min_area : int
+                Minimum number of pixels to not be removed.
         """
         tf = self.fibres.get_foreground(i_factor)
         tf = morph(tf, v_radius)
@@ -347,17 +351,17 @@ class PoreImage:
         fg = morph(fg, f_radius)
 
         self.foreground = tf | fg
+        if min_area != 0:
+            self.foreground = remove_small_holes(self.foreground, min_area)
         self.labelled, self.max_label = label(
             ~self.foreground, return_num=True, connectivity=1)
 
-    def get_areas(self):
+    def porosity(self):
         """
         """
-        return np.array([np.sum(self.labelled == k)
-                         for k in range(1, self.max_label + 1)])
+        return np.sum(~self.foreground) / self.foreground.size
 
-    def get_pore_coords(self, label):
+    def get_props(self):
         """
         """
-        i, j = np.nonzero(self.labelled == label)
-        return np.stack((i, j), axis=0)
+        return regionprops(self.labelled)
