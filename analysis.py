@@ -12,7 +12,7 @@ from numpy import linalg as la
 class FilteredImage:
     """
     An image which has been filtered using Frangi's filter for a given sigma.
-    The image represents a probability of a pixel being a vessel of radius
+    The image represents a probability of a pixel being a fibre of radius
     sigma. Also stores the Hessian matrix for this sigma, to extract the
     orientations when queried at a point.
 
@@ -34,7 +34,7 @@ class FilteredImage:
     def ensure_filter(method, kwargs):
         """
         Sets a method and arguments object to the defaults
-        (frangi, white vessels on black background) if not specified.
+        (frangi, white fibres on black background) if not specified.
         """
         if method is None:
             method = frangi
@@ -58,7 +58,7 @@ class FilteredImage:
                 `sigmas`.
             kwargs : dict
                 The optional keyword arguments for `method`. Defaults to 
-                identifying white vessels.
+                identifying white fibres.
         """
         method, kwargs = FilteredImage.ensure_filter(method, kwargs)
         self.image = method(image, sigmas=[sigma], **kwargs)
@@ -88,20 +88,51 @@ class FilteredImage:
         return angle if angle >= 0 else angle + np.pi
 
 
-class TubenessImage:
+def morph(image, radius):
+    """
+    For a foreground image, modify using opening/closing.
+
+    Parameters:
+        image : ndarray
+        radius: int
+            If positive, close the image. If negative, open.
+    """
+    if radius > 0:
+        return closing(image, disk(radius))
+    elif radius < 0:
+        return opening(image, disk(-radius))
+    else:
+        return image
+
+
+class FibreImage:
     """
     An image, filtered at multiple length scales for extracting statistics.
     Approach is intended to reject spurious fibres where possible, so is very
     conservative when segmenting foreground. Statistics should be interpreted
     as the probability of a randomly selected point on a fibre in the top layer
     having the given characteristic.
+
+    Attributes:
+        image : ndarray
+            Possibly processed (equalized/normalized)
+        images : dict: float -> `FilteredImage`
+            Maps filter length scale to filtered image
+        mask : ndarray
+            Binary mask used for sampling statistics
+        max : ndarray
+            The maximum response image over all filter scales
+        max_sigma : ndarray
+            The length scale which responded most intensely
     """
-    
+
     def __init__(self, image, sigmas,
                  equalize=False, normalize=True,
                  filter_method=None, filter_kwargs=None):
         """
-        
+        Preprocesses the image, creates filtered images for specified scales.
+        Sets the maximum response and associated length scales.
+        Sets mask to all-ones and computes scores for this mask.
         """
         filter_method, filter_kwargs = FilteredImage.ensure_filter(
             filter_method, filter_kwargs)
@@ -157,13 +188,14 @@ class TubenessImage:
                 list the same length as scales.
         """
         scores = {
-            'response': [f.response for f in self.images.values()],
-            'dominance': [f.dominance for f in self.images.values()],
-            'contribution': [f.contribution for f in self.images.values()],
-            'intensity': [f.contribution / f.dominance
-                          for f in self.images.values()],
+            'response': np.array([f.response for f in self.images.values()]),
+            'dominance': np.array([f.dominance for f in self.images.values()]),
+            'contribution': np.array([f.contribution
+                                      for f in self.images.values()]),
+            'intensity': np.array([f.contribution / f.dominance
+                                   for f in self.images.values()]),
         }
-        return list(self.images.keys()), scores
+        return np.fromiter(self.images.keys()), scores
 
     @staticmethod
     def get_threshold(image, method=None, kwargs=None):
@@ -195,10 +227,10 @@ class TubenessImage:
         """
         intensity = np.array([f.contribution / f.dominance
                               for f in self.images.values()])
-        sigmas = np.array(list(self.images.keys()))
+        sigmas = np.fromiter(self.images.keys(), dtype=float)
         idx = np.nonzero(intensity >= intensity_fraction * np.amax(intensity))
         t_image = self.get_filtered(sigmas[idx[0]])
-        threshold = TubenessImage.get_threshold(t_image, t_method, t_kwargs)
+        threshold = FibreImage.get_threshold(t_image, t_method, t_kwargs)
         return self.max > threshold
 
     def set_skeleton(self, intensity_fraction=0.9, opening_radius=2,
@@ -208,40 +240,37 @@ class TubenessImage:
         by morphological opening, then skeletonizes the result.
 
         Parameters:
-            intensity_fraction: float 
+            intensity_fraction : float 
                 See `get_foreground`
-            opening_radius: int
-                The disk diameter used for opening
-            t_method: callable (ndarray -> float)
+            opening_radius : int
+                The disk diameter used for opening (if negative, closes).
+            t_method : callable (ndarray -> float)
                 See `get_foreground`
-            t_kwargs: dict
+            t_kwargs : dict
                 See `get_foreground`
-            s_method: callable (ndarray -> ndarray)
+            s_method : callable (ndarray -> ndarray)
                 Skeletonization method, defaults to `skeletonize`
         """
         self.mask = self.get_foreground(intensity_fraction, t_method, t_kwargs)
-        if opening_radius != 0:
-            self.mask = opening(self.mask, disk(opening_radius))
+        self.mask = morph(self.mask, -opening_radius)
         if s_method is None:
             s_method = skeletonize
         self.mask = s_method(self.mask)
 
-    def get_diameter_count(self):
-        masked = self.mask * self.max_sigma
-        sigmas = np.fromiter(self.images.keys(), dtype=float)
-        count = [np.sum(masked == s) for s in sigmas]
-        return sigmas, count
-
     def get_diameters(self):
+        """
+        """
         masked = self.mask * self.max_sigma
         idx = np.nonzero(masked)
-        return [masked[tup] for tup in zip(idx[0], idx[1])]
+        return np.array([masked[tup] for tup in zip(idx[0], idx[1])])
 
     def get_orientations(self):
+        """
+        """
         masked = self.mask * self.max_sigma
         idx = np.nonzero(masked)
-        return [self.images[masked[tup]].get_orientation(tup)
-                for tup in zip(idx[0], idx[1])]
+        return np.array([self.images[masked[tup]].get_orientation(tup)
+                         for tup in zip(idx[0], idx[1])])
 
 
 def load(path):
@@ -262,55 +291,52 @@ def load(path):
 
 
 class PoreImage:
-    def __init__(self, tubeImage):
-        self.tube = tubeImage
+    """
+    For images with intense fibres in a top layer and less intense in lower 
+    layers, estimate the pore statistics in the top layer by identifying 
+    top layer fibres.
 
-    def segment(self, mode='i', threshold=None, close=0):
-        if mode == 'i':
-            if threshold is None:
-                threshold = 0.9
-            intensity = np.array([f.contribution / f.dominance
-                                  for f in self.tube.images.values()])
-            sigmas = np.array(list(self.tube.images.keys()))
-            idx = np.nonzero(intensity >= threshold * np.amax(intensity))
-            t_image = self.tube.get_filtered(sigmas[idx[0]])
-            threshold = threshold_otsu(t_image)
-            self.foreground = self.tube.max > threshold
-        elif mode == 'v':
-            if threshold is None:
-                threshold = threshold_otsu(self.tube.max)
-            self.foreground = self.tube.max > threshold
-        elif mode == 'f':
-            if threshold is None:
-                threshold = threshold_otsu(self.tube.image)
-            self.foreground = self.tube.image > threshold
-        elif mode == 'h':
-            # threshold_otsu(self.tube.image)
-            self.foreground = self.tube.image > threshold
-            # if threshold is None:
-            #    threshold = 0.9
-            intensity = np.array([f.contribution / f.dominance
-                                  for f in self.tube.images.values()])
-            sigmas = np.array(list(self.tube.images.keys()))
-            idx = np.nonzero(intensity >= threshold * np.amax(intensity))
-            t_image = self.tube.get_filtered(sigmas[idx[0]])
-            threshold = threshold_otsu(t_image)
-            self.foreground |= self.tube.max > threshold
+    Attributes:
+        fibres : FibreImage
+    """
 
-        if close != 0:
-            self.foreground = closing(self.foreground, disk(close))
+    def __init__(self, fibreImage):
+        """
+        """
+        self.fibres = fibreImage
 
-    def set_foreground(self, i_factor=0.9, c_radius=2, o_radius=2):
-        tf = self.tube.get_foreground(i_factor)
-        if c_radius != 0:
-            tf = closing(tf, disk(c_radius))
-        fg = self.tube.image > threshold_otsu(self.tube.image)
-        if o_radius != 0:
-            fg = opening(fg, disk(o_radius))
+    def set_foreground(self, i_factor=0.9, v_radius=2, f_radius=2, fg_std=1):
+        """
+        Generates the image foreground. Starting from the same method as
+        `FibreImage.get_foreground`, opens or closes this based on parameter
+        `v_radius`. Treating these prominent fibres as the 'top layer', the
+        mean and standard deviation of their pixels is used to generate a
+        threshold as `mean - fg_std * std`. This foreground is then 
+        opened/closed depending on `f_radius`, and merged with the fibres.
+
+        Parameters:
+            i_factor : float
+                See `FibreImage.get_foreground`.
+            v_radius : float
+                See `morph`, applied to fibre foreground.
+            f_radius : float
+                See `morph`, applied to image foreground.
+            fg_std : float
+                Generates image threshold from `mean(F) - fg_std * std(F)`,
+                where F are fibre pixels.
+        """
+        tf = self.fibres.get_foreground(i_factor)
+        tf = morph(tf, v_radius)
+
+        vfg = self.fibres.image[np.nonzero(tf)]
+        fg_thresold = np.mean(vfg) - fg_std * np.std(vfg)
+        fg = self.fibres.image > fg_thresold
+        fg = morph(fg, f_radius)
+
         self.foreground = tf | fg
 
     def analyze(self):
         self.labelled, self.max_label = label(
             ~self.foreground, return_num=True, connectivity=1)
-        self.areas = [np.sum(self.labelled == k)
-                      for k in range(1, self.max_label + 1)]
+        self.areas = np.array([np.sum(self.labelled == k)
+                               for k in range(1, self.max_label + 1)])

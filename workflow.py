@@ -1,4 +1,4 @@
-from analysis import TubenessImage, load
+from analysis import FibreImage, load
 import glob
 import numpy as np
 import matplotlib.pyplot as plt
@@ -45,7 +45,7 @@ def process_files(files, sMin=1, sMax=50, half_step=False,
     for file in files:
         im = load(file)
         im = im[idxR, idxC]
-        ti = TubenessImage(im, sigmas, equalize=eq)
+        ti = FibreImage(im, sigmas, equalize=eq)
         #_, d_whole = ti.get_scores()
         ti.set_skeleton(i_frac, o_rad)
         ti.set_scores()
