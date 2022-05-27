@@ -202,7 +202,7 @@ class FibreImage:
             'intensity': np.array([f.contribution / f.dominance
                                    for f in self.images.values()]),
         }
-        return np.fromiter(self.images.keys()), scores
+        return np.fromiter(self.images.keys(), dtype=float), scores
 
     @staticmethod
     def get_threshold(image, method=None, kwargs=None):

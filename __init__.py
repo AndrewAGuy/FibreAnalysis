@@ -1,1 +1,1 @@
-from .analysis import TubenessImage, load
+from .analysis import FibreImage, PoreImage, load
