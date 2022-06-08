@@ -1,1 +1,1 @@
-from .analysis import FibreImage, PoreImage, load
+from .analysis import FibreImage, PoreImage, load, morph
