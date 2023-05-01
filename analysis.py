@@ -12,8 +12,11 @@ from skimage.feature import hessian_matrix
 from skimage.exposure import equalize_hist
 from skimage.filters import frangi, threshold_otsu
 from skimage.measure import label, regionprops
+
 import numpy as np
 from numpy import linalg as la
+
+from types import SimpleNamespace
 
 
 class FilteredImage:
@@ -188,21 +191,20 @@ class FibreImage:
               equal to Contribution/Dominance
 
         Returns
-            scales : list
-                List of scales the filter was run at.
-            scores : dict
-                Dictionary with 4 entries, each of which is a
-                list the same length as scales.
+            scores: object
+                Has attributes 'scale', 'response', 'dominance', 
+                'contribution', 'intensity', which are arrays of equal length.
         """
-        scores = {
-            'response': np.array([f.response for f in self.images.values()]),
-            'dominance': np.array([f.dominance for f in self.images.values()]),
-            'contribution': np.array([f.contribution
-                                      for f in self.images.values()]),
-            'intensity': np.array([f.contribution / f.dominance
-                                   for f in self.images.values()]),
-        }
-        return np.fromiter(self.images.keys(), dtype=float), scores
+        scores = SimpleNamespace()
+        scores.scale = np.fromiter(self.images.keys(), dtype=float)
+        scores.response = np.array([f.response for f in self.images.values()])
+        scores.dominance = np.array([f.dominance 
+                                     for f in self.images.values()])
+        scores.contribution = np.array([f.contribution
+                                        for f in self.images.values()])
+        scores.intensity = np.array([f.contribution / f.dominance
+                                     for f in self.images.values()])
+        return scores
 
     @staticmethod
     def get_threshold(image, method=None, kwargs=None):
@@ -264,7 +266,7 @@ class FibreImage:
             s_method = skeletonize
         self.mask = s_method(self.mask)
 
-    def get_diameters(self):
+    def get_radii(self):
         """
         """
         masked = self.mask * self.max_sigma
