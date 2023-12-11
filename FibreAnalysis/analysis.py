@@ -73,7 +73,8 @@ class FilteredImage:
         method, kwargs = FilteredImage.ensure_filter(method, kwargs)
         self.image = method(image, sigmas=[sigma], **kwargs)
         self.sigma = sigma
-        self.hessian = hessian_matrix(image, sigma=sigma, order='rc')
+        self.hessian = hessian_matrix(image, sigma=sigma, order='rc',
+                                      use_gaussian_derivatives=False)
 
     def get_orientation(self, index):
         """
