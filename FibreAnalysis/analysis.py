@@ -97,6 +97,9 @@ class FilteredImage:
         v = V[:, np.argmin(np.abs(l))]
         angle = np.arctan2(v[1], v[0])
         return angle if angle >= 0 else angle + np.pi
+    
+    def _get_intensity(self):
+        return self.contribution / self.dominance if self.dominance != 0 else 0
 
 
 def morph(image, radius):
@@ -203,7 +206,7 @@ class FibreImage:
                                      for f in self.images.values()])
         scores.contribution = np.array([f.contribution
                                         for f in self.images.values()])
-        scores.intensity = np.array([f.contribution / f.dominance
+        scores.intensity = np.array([f._get_intensity()
                                      for f in self.images.values()])
         return scores
 
@@ -235,7 +238,7 @@ class FibreImage:
         maximum of filter images at length scales which are nearly as intense
         as the length scale which contributed most intensely.
         """
-        intensity = np.array([f.contribution / f.dominance
+        intensity = np.array([f._get_intensity()
                               for f in self.images.values()])
         sigmas = np.fromiter(self.images.keys(), dtype=float)
         idx = np.nonzero(intensity >= intensity_fraction * np.amax(intensity))
